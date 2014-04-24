@@ -1,37 +1,35 @@
-""" isort.py
+"""isort.py.
 
-    Exposes a simple library to sort through imports within Python code
+Exposes a simple library to sort through imports within Python code
 
-    usage:
-        SortImports(file_name)
-    or:
-        sorted = SortImports(file_contents=file_contents).output
+usage:
+    SortImports(file_name)
+or:
+    sorted = SortImports(file_contents=file_contents).output
 
-    Copyright (C) 2013  Timothy Edmund Crosley
+Copyright (C) 2013  Timothy Edmund Crosley
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-    documentation files (the "Software"), to deal in the Software without restriction, including without limitation
-    the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
-    to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-    The above copyright notice and this permission notice shall be included in all copies or
-    substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-    TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-    OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
 
 """
-
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import codecs
 import copy
 import itertools
 import os
-import os.path
 from collections import namedtuple
 from difflib import unified_diff
 from sys import path as PYTHONPATH
@@ -47,14 +45,25 @@ SECTIONS = namedtuple('Sections', SECTION_NAMES)(*range(len(SECTION_NAMES)))
 
 
 class SortImports(object):
-    config = settings.default
     incorrectly_sorted = False
 
     def __init__(self, file_path=None, file_contents=None, write_to_stdout=False, check=False,
-                 show_diff=False, **setting_overrides):
-        if setting_overrides:
-            self.config = settings.default.copy()
-            self.config.update(setting_overrides)
+                 show_diff=False, settings_path=None, **setting_overrides):
+
+        if not settings_path and file_path:
+            settings_path = os.path.dirname(os.path.abspath(file_path))
+        settings_path = settings_path or os.getcwd()
+
+        self.config = settings.from_path(settings_path).copy()
+        for key, value in itemsview(setting_overrides):
+            access_key = key.replace('not_', '').lower()
+            if type(self.config.get(access_key)) in (list, tuple):
+                if key.startswith('not_'):
+                    self.config[access_key] = list(set(self.config[access_key]).difference(value))
+                else:
+                    self.config[access_key] = list(set(self.config[access_key]).union(value))
+            else:
+                self.config[key] = value
 
         indent = str(self.config['indent'])
         if indent.isdigit():
@@ -74,9 +83,7 @@ class SortImports(object):
         self.file_path = file_path or ""
         if file_path:
             file_path = os.path.abspath(file_path)
-            if "/" in file_name:
-                file_name = file_name[file_name.rfind('/') + 1:]
-            if file_name in self.config['skip']:
+            if self._should_skip(file_path):
                 print("WARNING: {0} was skipped as it's listed in 'skip' setting".format(file_path), file=stderr)
                 file_contents = None
             else:
@@ -90,11 +97,13 @@ class SortImports(object):
 
         self.in_lines = file_contents.split("\n")
         self.original_length = len(self.in_lines)
-        for add_import in self.add_imports:
-            self.in_lines.append(add_import)
+        if (self.original_length > 1 or self.in_lines[:1] not in ([], [""])) or self.config.get('force_adds', False):
+            for add_import in self.add_imports:
+                self.in_lines.append(add_import)
         self.number_of_lines = len(self.in_lines)
 
         self.out_lines = []
+        self.comments = {'from': {}, 'straight': {}}
         self.imports = {}
         self.as_map = {}
         for section in itertools.chain(SECTIONS, self.config['forced_separate']):
@@ -102,6 +111,8 @@ class SortImports(object):
 
         self.index = 0
         self.import_index = -1
+        self._first_comment_index_start = -1
+        self._first_comment_index_end = -1
         self._parse()
         if self.import_index != -1:
             self._add_formatted_imports()
@@ -112,6 +123,20 @@ class SortImports(object):
         self.out_lines.append("")
 
         self.output = "\n".join(self.out_lines)
+        if self.config.get('atomic', False):
+            try:
+                compile(self._strip_top_comments(self.out_lines), self.file_path, 'exec', 0, 1)
+            except SyntaxError:
+                self.output = file_contents
+                self.incorrectly_sorted = True
+                try:
+                    compile(self._strip_top_comments(self.in_lines), self.file_path, 'exec', 0, 1)
+                    print("ERROR: {0} isort would have introduced syntax errors, please report to the project!". \
+                          format(self.file_path), file=stderr)
+                except SyntaxError:
+                    print("ERROR: {0} File contains syntax errors.".format(self.file_path), file=stderr)
+
+                return
         if check:
             if self.output == file_contents:
                 print("SUCCESS: {0} Everything Looks Good!".format(self.file_path))
@@ -130,10 +155,29 @@ class SortImports(object):
             with codecs.open(self.file_path, encoding='utf-8', mode='w') as output_file:
                 output_file.write(self.output)
 
+    @staticmethod
+    def _strip_top_comments(lines):
+        """Strips # comments that exist at the top of the given lines"""
+        lines = copy.copy(lines)
+        while lines and lines[0].startswith("#"):
+            lines = lines[1:]
+        return "\n".join(lines)
+
+    def _should_skip(self, filename):
+        """Returns True if the file should be skipped based on the loaded settings."""
+        if filename in self.config['skip']:
+            return True
+
+        position = os.path.split(filename)
+        while position[1]:
+            if position[1] in self.config['skip']:
+                return True
+            position = os.path.split(position[0])
+
     def place_module(self, moduleName):
-        """ Tries to determine if a module is a python std import,
-            third party import, or project code:
-            if it can't determine - it assumes it is project code
+        """Tries to determine if a module is a python std import, third party import, or project code:
+
+        if it can't determine - it assumes it is project code
 
         """
         if moduleName.startswith("."):
@@ -174,40 +218,65 @@ class SortImports(object):
         return SECTION_NAMES.index(self.config['default_section'])
 
     def _get_line(self):
-        """ Returns the current line from the file while incrementing the index
-
-        """
+        """Returns the current line from the file while incrementing the index."""
         line = self.in_lines[self.index]
         self.index += 1
         return line
 
     @staticmethod
     def _import_type(line):
-        """ If the current line is an import line it will
-            return its type (from or straight)
-
-        """
+        """If the current line is an import line it will return its type (from or straight)"""
         if "isort:skip" in line:
             return
         elif line.startswith('import '):
             return "straight"
-        elif line.startswith('from ') and "import" in line:
+        elif line.startswith('from '):
             return "from"
 
     def _at_end(self):
-        """ returns True if we are at the end of the file """
+        """returns True if we are at the end of the file."""
         return self.index == self.number_of_lines
 
     @staticmethod
-    def _module_key(module_name, config):
-        module_name = str(module_name).lower()
-        return "{0}{1}".format(module_name in config['force_to_top'] and "A" or "B",
-                               config['length_sort'] and (str(len(module_name)) + ":" + module_name) or module_name)
+    def _module_key(module_name, config, sub_imports=False):
+        prefix = ""
+        module_name = str(module_name)
+        if sub_imports and config['order_by_type']:
+            if module_name.isupper():
+                prefix = "A"
+            elif module_name[0:1].isupper():
+                prefix = "B"
+            else:
+                prefix = "C"
+        module_name = module_name.lower()
+        return "{0}{1}{2}".format(module_name in config['force_to_top'] and "A" or "B", prefix,
+                                  config['length_sort'] and (str(len(module_name)) + ":" + module_name) or module_name)
+
+    def _add_comments(self, comments, original_string=""):
+        """
+            Returns a string with comments added
+        """
+        return comments and "{0}  # {1}".format(self._strip_comments(original_string)[0],
+                                               "; ".join(comments)) or original_string
+
+    def _wrap(self, line):
+        """
+            Returns an import wrapped to the specified line-length, if possible.
+        """
+        if len(line) > self.config['line_length'] and "." in line:
+            line_parts = line.split(".")
+            next_line = []
+            while (len(line) + 2) > self.config['line_length'] and line_parts:
+                next_line.append(line_parts.pop())
+                line = ".".join(line_parts)
+            return "{0}. \\\n{1}".format(line, self._wrap(self.config['indent'] + ".".join(next_line)))
+
+        return line
 
     def _add_formatted_imports(self):
-        """ Adds the imports back to the file
-            (at the index of the first import)
-            sorted alphabetically and split between groups
+        """Adds the imports back to the file.
+
+        (at the index of the first import) sorted alphabetically and split between groups
 
         """
         output = []
@@ -221,9 +290,11 @@ class SortImports(object):
                     continue
 
                 if module in self.as_map:
-                    section_output.append("import {0} as {1}".format(module, self.as_map[module]))
+                    import_definition = "import {0} as {1}".format(module, self.as_map[module])
                 else:
-                    section_output.append("import {0}".format(module))
+                    import_definition = "import {0}".format(module)
+
+                section_output.append(self._add_comments(self.comments['straight'].get(module), import_definition))
 
             from_modules = list(self.imports[section]['from'].keys())
             from_modules = natsorted(from_modules, key=lambda key: self._module_key(key, self.config))
@@ -233,7 +304,7 @@ class SortImports(object):
 
                 import_start = "from {0} import ".format(module)
                 from_imports = list(self.imports[section]['from'][module])
-                from_imports = natsorted(from_imports, key=lambda key: self._module_key(key, self.config))
+                from_imports = natsorted(from_imports, key=lambda key: self._module_key(key, self.config, True))
                 if self.remove_imports:
                     from_imports = [line for line in from_imports if not "{0}.{1}".format(module, line) in
                                     self.remove_imports]
@@ -241,39 +312,60 @@ class SortImports(object):
                 for from_import in copy.copy(from_imports):
                     import_as = self.as_map.get(module + "." + from_import, False)
                     if import_as:
-                        section_output.append(import_start + "{0} as {1}".format(from_import, import_as))
-                        from_imports.remove(from_import)
+                        import_definition = "{0} as {1}".format(from_import, import_as)
+                        if self.config['combine_as_imports'] and not ("*" in from_imports and
+                                                                      self.config['combine_star']):
+                            from_imports[from_imports.index(from_import)] = import_definition
+                        else:
+                            import_statement = self._wrap(import_start + import_definition)
+                            section_output.append(import_statement)
+                            from_imports.remove(from_import)
 
                 if from_imports:
-                    if "*" in from_imports:
-                        import_statement = "{0}*".format(import_start)
+                    comments = self.comments['from'].get(module)
+                    if "*" in from_imports and self.config['combine_star']:
+                        import_statement = self._wrap(self._add_comments(comments, "{0}*".format(import_start)))
                     elif self.config['force_single_line']:
-                        import_statement = import_start + from_imports.pop(0)
+                        import_statement = self._wrap(self._add_comments(comments, import_start + from_imports.pop(0)))
                         for from_import in from_imports:
                             import_statement += "\n{0}{1}".format(import_start, from_import)
+                            comments = None
                     else:
-                        import_statement = import_start + (", ").join(from_imports)
-                        if len(import_statement) > self.config['line_length'] and len(from_imports) > 1:
-                            output_mode = settings.WrapModes._fields[self.config.get('multi_line_output', 0)].lower()
-                            formatter = getattr(self, "_output_" + output_mode, self._output_grid)
-                            dynamic_indent = " " * (len(import_start) + 1)
-                            indent = self.config['indent']
-                            line_length = self.config['line_length']
-                            import_statement = formatter(import_start, copy.copy(from_imports),
-                                                         dynamic_indent, indent, line_length)
-                            if self.config['balanced_wrapping']:
-                                lines = import_statement.split("\n")
-                                line_count = len(lines)
-                                minimum_length = min([len(line) for line in lines[:-1]])
-                                new_import_statement = import_statement
-                                while len(lines[-1]) < minimum_length and len(lines) == line_count and line_length > 10:
-                                    import_statement = new_import_statement
-                                    line_length -= 1
-                                    new_import_statement = formatter(import_start, copy.copy(from_imports),
-                                                                     dynamic_indent, indent, line_length)
-                                    lines = new_import_statement.split("\n")
+                        if "*" in from_imports:
+                            section_output.append(self._add_comments(comments, "{0}*".format(import_start)))
+                            from_imports.remove('*')
+                            import_statement = import_start + (", ").join(from_imports)
+                        else:
+                            import_statement = self._add_comments(comments, import_start + (", ").join(from_imports))
+                        if not from_imports:
+                            import_statement = ""
+                        if len(import_statement) > self.config['line_length']:
+                            if len(from_imports) > 1:
+                                output_mode = settings.WrapModes._fields[self.config.get('multi_line_output',
+                                                                                         0)].lower()
+                                formatter = getattr(self, "_output_" + output_mode, self._output_grid)
+                                dynamic_indent = " " * (len(import_start) + 1)
+                                indent = self.config['indent']
+                                line_length = self.config['line_length']
+                                import_statement = formatter(import_start, copy.copy(from_imports),
+                                                            dynamic_indent, indent, line_length, comments)
+                                if self.config['balanced_wrapping']:
+                                    lines = import_statement.split("\n")
+                                    line_count = len(lines)
+                                    minimum_length = min([len(line) for line in lines[:-1]])
+                                    new_import_statement = import_statement
+                                    while (len(lines[-1]) < minimum_length and
+                                           len(lines) == line_count and line_length > 10):
+                                        import_statement = new_import_statement
+                                        line_length -= 1
+                                        new_import_statement = formatter(import_start, copy.copy(from_imports),
+                                                                        dynamic_indent, indent, line_length, comments)
+                                        lines = new_import_statement.split("\n")
+                            else:
+                                import_statement = self._wrap(import_statement)
 
-                    section_output.append(import_statement)
+                    if import_statement:
+                        section_output.append(import_statement)
 
             if section_output:
                 section_name = section
@@ -287,53 +379,67 @@ class SortImports(object):
         while [character.strip() for character in output[-1:]] == [""]:
             output.pop()
 
-        self.out_lines[self.import_index:0] = output
+        output_at = 0
+        if self.import_index < self.original_length:
+            output_at = self.import_index
+        elif self._first_comment_index_end != -1 and self._first_comment_index_start <= 2:
+            output_at = self._first_comment_index_end
+        self.out_lines[output_at:0] = output
 
-        imports_tail = self.import_index + len(output)
+        imports_tail = output_at + len(output)
         while [character.strip() for character in self.out_lines[imports_tail: imports_tail + 1]] == [""]:
             self.out_lines.pop(imports_tail)
 
         if len(self.out_lines) > imports_tail:
-            next_construct = self.out_lines[imports_tail]
-            if next_construct.startswith("def") or next_construct.startswith("class") or \
+            next_construct = ""
+            self._in_quote = False
+            for line in self.out_lines[imports_tail:]:
+                if not self._skip_line(line) and not line.strip().startswith("#") and line.strip():
+                    next_construct = line
+                    break
+
+            if self.config['lines_after_imports'] != -1:
+                self.out_lines[imports_tail:0] = ["" for line in range(self.config['lines_after_imports'])]
+            elif next_construct.startswith("def") or next_construct.startswith("class") or \
                next_construct.startswith("@"):
                 self.out_lines[imports_tail:0] = ["", ""]
             else:
                 self.out_lines[imports_tail:0] = [""]
 
-    @staticmethod
-    def _output_grid(statement, imports, white_space, indent, line_length):
+    def _output_grid(self, statement, imports, white_space, indent, line_length, comments):
         statement += "(" + imports.pop(0)
         while imports:
             next_import = imports.pop(0)
-            next_statement = statement + ", " + next_import
+            next_statement = self._add_comments(comments, statement + ", " + next_import)
             if len(next_statement.split("\n")[-1]) + 1 > line_length:
-                next_statement = "{0},\n{1}{2}".format(statement, white_space, next_import)
+                next_statement = (self._add_comments(comments, "{0},".format(statement)) +
+                                  "\n{0}{1}".format(white_space, next_import))
+                comments = None
             statement = next_statement
         return statement + ")"
 
-    @staticmethod
-    def _output_vertical(statement, imports, white_space, indent, line_length):
-        return "{0}({1})".format(statement, (",\n" + white_space).join(imports))
+    def _output_vertical(self, statement, imports, white_space, indent, line_length, comments):
+        first_import = self._add_comments(comments, imports.pop(0) + ",") + "\n" + white_space
+        return "{0}({1}{2})".format(statement, first_import, (",\n" + white_space).join(imports))
 
-    @staticmethod
-    def _output_hanging_indent(statement, imports, white_space, indent, line_length):
+    def _output_hanging_indent(self, statement, imports, white_space, indent, line_length, comments):
         statement += imports.pop(0)
         while imports:
             next_import = imports.pop(0)
-            next_statement = statement + ", " + next_import
+            next_statement = self._add_comments(comments, statement + ", " + next_import)
             if len(next_statement.split("\n")[-1]) + 3 > line_length:
-                next_statement = "{0}, \\\n{1}{2}".format(statement, indent, next_import)
+                next_statement = (self._add_comments(comments, "{0}, \\".format(statement)) +
+                                  "\n{0}{1}".format(indent, next_import))
+                comments = None
             statement = next_statement
         return statement
 
-    @staticmethod
-    def _output_vertical_hanging_indent(statement, imports, white_space, indent, line_length):
-        return "{0}(\n{1}{2}\n)".format(statement, indent, (",\n" + indent).join(imports))
+    def _output_vertical_hanging_indent(self, statement, imports, white_space, indent, line_length, comments):
+        return "{0}({1}\n{2}{3}\n)".format(statement, self._add_comments(comments), indent,
+                                           (",\n" + indent).join(imports))
 
-    @staticmethod
-    def _output_vertical_grid_common(statement, imports, white_space, indent, line_length):
-        statement += "(\n" + indent + imports.pop(0)
+    def _output_vertical_grid_common(self, statement, imports, white_space, indent, line_length, comments):
+        statement += self._add_comments(comments, "(") + "\n" + indent + imports.pop(0)
         while imports:
             next_import = imports.pop(0)
             next_statement = "{0}, {1}".format(statement, next_import)
@@ -342,25 +448,24 @@ class SortImports(object):
             statement = next_statement
         return statement
 
-    @classmethod
-    def _output_vertical_grid(cls, statement, imports, white_space, indent, line_length):
-        return cls._output_vertical_grid_common(statement, imports, white_space, indent, line_length) + ")"
+    def _output_vertical_grid(self, statement, imports, white_space, indent, line_length, comments):
+        return self._output_vertical_grid_common(statement, imports, white_space, indent, line_length, comments) + ")"
 
-    @classmethod
-    def _output_vertical_grid_grouped(cls, statement, imports, white_space, indent, line_length):
-        return cls._output_vertical_grid_common(statement, imports, white_space, indent, line_length) + "\n)"
+    def _output_vertical_grid_grouped(self, statement, imports, white_space, indent, line_length, comments):
+        return self._output_vertical_grid_common(statement, imports, white_space, indent, line_length, comments) + "\n)"
 
     @staticmethod
-    def _strip_comments(line):
-        """ Removes comments from import line
+    def _strip_comments(line, comments=None):
+        """Removes comments from import line."""
+        if comments is None:
+            comments = []
 
-        """
         comment_start = line.find("#")
         if comment_start != -1:
-            print("Removing comment(%s) so imports can be sorted correctly" % line[comment_start:], file=stderr)
+            comments.append(line[comment_start + 1:].strip())
             line = line[:comment_start]
 
-        return line
+        return line, comments
 
     @staticmethod
     def _format_simplified(import_line):
@@ -385,32 +490,40 @@ class SortImports(object):
 
         return import_line
 
-    def _parse(self):
-        """ Parses a python file taking out and categorizing imports
+    def _skip_line(self, line):
+        skip_line = self._in_quote
+        if '"' in line or "'" in line:
+            index = 0
+            if self._first_comment_index_start == -1:
+                self._first_comment_index_start = self.index
+            while index < len(line):
+                if line[index] == "\\":
+                    index += 1
+                elif self._in_quote:
+                    if line[index:index + len(self._in_quote)] == self._in_quote:
+                        self._in_quote = False
+                        if self._first_comment_index_end == -1:
+                            self._first_comment_index_end = self.index
+                elif line[index] in ("'", '"'):
+                    long_quote = line[index:index + 3]
+                    if long_quote in ('"""', "'''"):
+                        self._in_quote = long_quote
+                        index += 2
+                    else:
+                        self._in_quote = line[index]
+                elif line[index] == "#":
+                    break
+                index += 1
 
-        """
-        in_quote = False
+        return skip_line or self._in_quote
+
+
+    def _parse(self):
+        """Parses a python file taking out and categorizing imports."""
+        self._in_quote = False
         while not self._at_end():
             line = self._get_line()
-            skip_line = in_quote
-            if '"' in line or "'" in line:
-                index = 0
-                while index < len(line):
-                    if line[index] == "\\":
-                        index += 1
-                    elif in_quote:
-                        if line[index:index + len(in_quote)] == in_quote:
-                            in_quote = False
-                    elif line[index] in ("'", '"'):
-                        long_quote = line[index:index + 3]
-                        if long_quote in ('"""', "'''"):
-                            in_quote = long_quote
-                            index += 2
-                        else:
-                            in_quote = line[index]
-                    elif line[index] == "#":
-                        break
-                    index += 1
+            skip_line = self._skip_line(line)
 
             if line in self._section_comments and not skip_line:
                 if self.import_index == -1:
@@ -425,15 +538,23 @@ class SortImports(object):
             if self.import_index == -1:
                 self.import_index = self.index - 1
 
-            import_string = self._strip_comments(line)
+            import_string, comments = self._strip_comments(line)
             if "(" in line and not self._at_end():
                 while not line.strip().endswith(")") and not self._at_end():
-                    line = self._strip_comments(self._get_line())
+                    line, comments = self._strip_comments(self._get_line(), comments)
                     import_string += "\n" + line
             else:
                 while line.strip().endswith("\\"):
-                    line = self._strip_comments(self._get_line())
-                    import_string += "\n" + line
+                    line, comments = self._strip_comments(self._get_line(), comments)
+                    if import_string.strip().endswith(" import") or line.strip().startswith("import "):
+                        import_string += "\n" + line
+                    else:
+                        import_string = import_string.rstrip().rstrip("\\") + line.lstrip()
+
+            if import_type == "from":
+                parts = import_string.split(" import ")
+                from_import = parts[0].split(" ")
+                import_string = " import ".join([from_import[0] + " " + "".join(from_import[1:])] + parts[1:])
 
             import_string = import_string.replace("_import", "[[i]]")
             for remove_syntax in ['\\', '(', ')', ",", 'from ', 'import ']:
@@ -452,10 +573,15 @@ class SortImports(object):
             if import_type == "from":
                 import_from = imports.pop(0)
                 root = self.imports[self.place_module(import_from)][import_type]
+                if comments:
+                    self.comments['from'].setdefault(import_from, []).extend(comments)
                 if root.get(import_from, False):
                     root[import_from].update(imports)
                 else:
                     root[import_from] = set(imports)
             else:
                 for module in imports:
+                    if comments:
+                        self.comments['straight'][module] = comments
+                        comments = None
                     self.imports[self.place_module(module)][import_type].add(module)
