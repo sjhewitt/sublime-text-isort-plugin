@@ -35,8 +35,12 @@ from difflib import unified_diff
 from sys import path as PYTHONPATH
 from sys import stderr, stdout
 
-from natsort import natsorted
-from pies.overrides import *
+try:
+    from natsort import natsorted
+    from pies.overrides import *
+except ImportError:
+    from ..natsort import natsorted
+    from ..pies.overrides import *
 
 from . import settings
 

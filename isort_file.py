@@ -1,6 +1,9 @@
 import sublime
 import sublime_plugin
-from isort import SortImports
+try:
+    from isort import SortImports
+except ImportError:
+    from .isort.isort import SortImports
 
 
 class IsortCommand(sublime_plugin.TextCommand):
