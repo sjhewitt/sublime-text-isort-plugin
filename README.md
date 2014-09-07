@@ -64,6 +64,7 @@ Project-specific settings are defined by an `"isort"` object within the `"settin
 The following settings are supported by the plugin:
 
 - `python_bin`: Path to the Python interpreter that is used for executing isort. You can set this to your virtualenv's Python interpreter (e.g. `/home/username/.virtualenvs/myproject/bin/python`). The default value is `"python"`.
+- `isort_on_save`: Set to `true` to sort Python imports automatically on save. Defaults to `true`.
 
 ![isort](https://raw.github.com/timothycrosley/isort/master/logo.png)
 =====
