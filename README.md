@@ -38,6 +38,33 @@ $ git clone https://github.com/thijsdezoete/sublime-text-isort-plugin
 [isort]: https://github.com/timothycrosley/isort
 [package-control]: https://github.com/wbond/package_control_channel
 
+## Settings
+
+You can see the default settings by navigating to `Preferences -> Packages Settings -> Isort -> Settings - Default`. If you want to modify the default settings, navigate to `Preferences -> Packages Settings -> Isort -> Settings - User`.
+
+Project-specific settings are defined by an `"isort"` object within the `"settings"` object in Sublime Text's project settings. You can open project settings selecting `Project -> Edit Project` from the menu. Here is an example project settings file with some isort settings:
+
+```json
+{
+    "folders":
+    [
+        {
+            "follow_symlinks": true,
+            "path": "/Users/johnmatrix/Projects/myproject"
+        }
+    ],
+    "settings": {
+        "isort": {
+            "python_bin": "/Users/johnmatrix/.virtualenvs/myproject/lib/python2.7/bin/python"
+        }
+    }
+}
+```
+
+The following settings are supported by the plugin:
+
+- `python_bin`: Path to the Python interpreter that is used for executing isort. You can set this to your virtualenv's Python interpreter (e.g. `/home/username/.virtualenvs/myproject/bin/python`). The default value is `"python"`.
+
 ![isort](https://raw.github.com/timothycrosley/isort/master/logo.png)
 =====
 
