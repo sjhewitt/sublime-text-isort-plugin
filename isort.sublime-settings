@@ -1,0 +1,6 @@
+{
+  // Path to the Python interpreter that is used for executing isort. You can
+  // set this to your virtualenv's Python interpreter
+  // (e.g. `/home/username/.virtualenvs/myproject/bin/python`).
+  "python_bin": "python"
+}

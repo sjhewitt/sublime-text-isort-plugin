@@ -5,6 +5,7 @@ import tempfile
 import sublime
 import sublime_plugin
 
+from . import settings
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -67,7 +68,11 @@ class IsortCommand(sublime_plugin.TextCommand):
 
     def _execute_isort(self, code, filename):
         args = [
-            'python',
+            settings.get(
+                view=self.get_view(),
+                name='python_bin',
+                default='python'
+            ),
             'isort.py',
             '--stdout',
         ]
