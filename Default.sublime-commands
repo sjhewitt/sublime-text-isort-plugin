@@ -1,5 +1,19 @@
 [
     {
+        "caption": "Preferences: Isort Settings – Default",
+        "command": "open_file",
+        "args": {
+            "file": "${packages}/isort/isort.sublime-settings"
+        }
+    },
+    {
+        "caption": "Preferences: Isort Settings – User",
+        "command": "open_file",
+        "args": {
+            "file": "${packages}/User/isort.sublime-settings"
+        }
+    },
+    {
         "caption": "ImportSort: Sort imports",
         "command": "isort"
     }
