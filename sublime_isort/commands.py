@@ -11,6 +11,8 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class IsortCommand(sublime_plugin.TextCommand):
+    PYTHON_SYNTAX = 'Packages/Python/Python.tmLanguage'
+
     view = None
 
     def get_region(self, view):
@@ -44,8 +46,16 @@ class IsortCommand(sublime_plugin.TextCommand):
         profile = sublime.active_window().active_view().settings().get('isort')
         return profile or {}
 
+    @property
+    def is_python(self):
+        return self.get_view().settings().get('syntax') == self.PYTHON_SYNTAX
+
     def run(self, edit):
         this_view = self.get_view()
+
+        if not self.is_python:
+            return
+
         current_positions = self.get_positions()
 
         this_contents = self.get_buffer_contents(this_view)
