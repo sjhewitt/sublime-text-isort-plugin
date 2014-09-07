@@ -1,12 +1,12 @@
 import os
-import sys
+import subprocess
+import tempfile
 
 import sublime
 import sublime_plugin
 
-sys.path.append(os.path.dirname(__file__))
 
-from .isort import SortImports
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class IsortCommand(sublime_plugin.TextCommand):
@@ -48,14 +48,53 @@ class IsortCommand(sublime_plugin.TextCommand):
         current_positions = self.get_positions()
 
         this_contents = self.get_buffer_contents(this_view)
-        settings = self.get_settings()
-        sorted_imports = SortImports(
-            file_contents=this_contents,
-            **settings
-        ).output
-        this_view.replace(edit, self.get_region(this_view), sorted_imports)
+        try:
+            sorted_imports = self._execute_isort(
+                code=this_contents,
+                filename=this_view.file_name()
+            )
+        except Exception as e:
+            sublime.error_message(
+                'An error occurred while executing isort: %s' % e
+            )
+        else:
+            this_view.replace(edit, self.get_region(this_view), sorted_imports)
 
-        # Our sel has moved now..
-        remove_sel = this_view.sel()[0]
-        this_view.sel().subtract(remove_sel)
-        self.set_cursor_back(current_positions)
+            # Our sel has moved now..
+            remove_sel = this_view.sel()[0]
+            this_view.sel().subtract(remove_sel)
+            self.set_cursor_back(current_positions)
+
+    def _execute_isort(self, code, filename):
+        args = [
+            'python',
+            'isort.py',
+            '--stdout',
+        ]
+        if filename:
+            settings_path = os.path.dirname(filename)
+            args.append('--settings-path')
+            args.append(settings_path)
+
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(code.encode('utf-8'))
+            f.flush()
+            output = check_output(args + [f.name], cwd=CURRENT_DIR)
+
+        return output.decode('utf-8')
+
+
+def check_output(*popenargs, **kwargs):
+    process = subprocess.Popen(
+        stdout=subprocess.PIPE,
+        *popenargs,
+        **kwargs
+    )
+    output, _ = process.communicate()
+    return_code = process.poll()
+    if return_code:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = popenargs[0]
+        raise subprocess.CalledProcessError(return_code, cmd)
+    return output
