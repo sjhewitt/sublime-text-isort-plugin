@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tempfile
 
@@ -11,7 +12,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class IsortCommand(sublime_plugin.TextCommand):
-    PYTHON_SYNTAX = 'Packages/Python/Python.tmLanguage'
+    PYTHON_SYNTAX_REGEX = re.compile(r'^Packages\/.+\/Python.*\.tmLanguage$')
 
     view = None
 
@@ -48,7 +49,8 @@ class IsortCommand(sublime_plugin.TextCommand):
 
     @property
     def is_python(self):
-        return self.get_view().settings().get('syntax') == self.PYTHON_SYNTAX
+        current_syntax = self.get_view().settings().get('syntax')
+        return bool(self.PYTHON_SYNTAX_REGEX.match(current_syntax))
 
     def run(self, edit):
         this_view = self.get_view()
