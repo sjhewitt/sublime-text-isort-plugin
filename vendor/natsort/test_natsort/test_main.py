@@ -2,299 +2,294 @@
 """\
 Test the natsort command-line tool functions.
 """
+from __future__ import print_function, unicode_literals
+import pytest
 import re
 import sys
 from pytest import raises
-from natsort.__main__ import main, range_check, check_filter
-from natsort.__main__ import keep_entry_range, exclude_entry
-from natsort.__main__ import sort_and_print_entries
+from compat.mock import patch, call
+from compat.hypothesis import (
+    assume,
+    given,
+    sampled_from,
+    integers,
+    floats,
+    tuples,
+    text,
+    use_hypothesis,
+)
+from natsort.__main__ import (
+    main,
+    range_check,
+    check_filter,
+    keep_entry_range,
+    exclude_entry,
+    sort_and_print_entries,
+    py23_str,
+)
 
 
-def test_main(capsys):
-
-    # Simple sorting
-    sys.argv[1:] = ['num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-6
-num-2
-num-1
-"""
-
-    # Reverse order
-    sys.argv[1:] = ['-r', 'num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-1
-num-2
-num-6
-"""
-
-    # Neglect '-' or '+'
-    sys.argv[1:] = ['--nosign', 'num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-1
-num-2
-num-6
-"""
-
-    # Sort as digits
-    sys.argv[1:] = ['-t', 'digit', 'num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-1
-num-2
-num-6
-"""
-
-    # Sort as versions (synonym for digits)
-    sys.argv[1:] = ['-t', 'version', 'num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-1
-num-2
-num-6
-"""
-
-    # Exclude the number -1 and 6.  Only -1 is present.
-    sys.argv[1:] = ['-t', 'int', '-e', '-1', '-e', '6',
-                    'num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-6
-num-2
-"""
-
-    # Exclude the number 1 and 6.
-    # Both are present because we use digits/versions.
-    sys.argv[1:] = ['-t', 'ver', '-e', '1', '-e', '6',
-                    'num-2', 'num-6', 'num-1']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-num-2
-"""
-
-    # Floats work too.
-    sys.argv[1:] = ['a1.0e3', 'a5.3', 'a453.6']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-a5.3
-a453.6
-a1.0e3
-"""
-
-    # Only include in the range of 1-10.
-    sys.argv[1:] = ['-f', '1', '10', 'a1.0e3', 'a5.3', 'a453.6']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-a5.3
-"""
-
-    # Don't include in the range of 1-10.
-    sys.argv[1:] = ['-F', '1', '10', 'a1.0e3', 'a5.3', 'a453.6']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-a453.6
-a1.0e3
-"""
-
-    # Include two ranges.
-    sys.argv[1:] = ['-f', '1', '10', '-f', '400', '500',
-                    'a1.0e3', 'a5.3', 'a453.6']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-a5.3
-a453.6
-"""
-
-    # Don't account for exponential notation.
-    sys.argv[1:] = ['--noexp', 'a1.0e3', 'a5.3', 'a453.6']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-a1.0e3
-a5.3
-a453.6
-"""
-
-    # To sort complicated filenames you need --paths
-    sys.argv[1:] = ['/Folder (1)/', '/Folder/', '/Folder (10)/']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-/Folder (1)/
-/Folder (10)/
-/Folder/
-"""
-    sys.argv[1:] = ['--paths', '/Folder (1)/', '/Folder/', '/Folder (10)/']
-    main()
-    out, __ = capsys.readouterr()
-    assert out == """\
-/Folder/
-/Folder (1)/
-/Folder (10)/
-"""
+def test_main_passes_default_arguments_with_no_command_line_options():
+    with patch('natsort.__main__.sort_and_print_entries') as p:
+        sys.argv[1:] = ['num-2', 'num-6', 'num-1']
+        main()
+        args = p.call_args[0][1]
+        assert not args.paths
+        assert args.filter is None
+        assert args.reverse_filter is None
+        assert args.exclude is None
+        assert not args.reverse
+        assert args.number_type == 'int'
+        assert not args.signed
+        assert args.exp
+        assert not args.locale
 
 
-def test_range_check():
+def test_main_passes_arguments_with_all_command_line_options():
+    with patch('natsort.__main__.sort_and_print_entries') as p:
+        sys.argv[1:] = ['--paths', '--reverse', '--locale',
+                        '--filter', '4', '10',
+                        '--reverse-filter', '100', '110',
+                        '--number-type', 'float', '--noexp', '--sign',
+                        '--exclude', '34', '--exclude', '35',
+                        'num-2', 'num-6', 'num-1']
+        main()
+        args = p.call_args[0][1]
+        assert args.paths
+        assert args.filter == [(4.0, 10.0)]
+        assert args.reverse_filter == [(100.0, 110.0)]
+        assert args.exclude == [34, 35]
+        assert args.reverse
+        assert args.number_type == 'float'
+        assert args.signed
+        assert not args.exp
+        assert args.locale
 
-    # Floats are always returned
+
+class Args:
+    """A dummy class to simulate the argparse Namespace object"""
+    def __init__(self, filter, reverse_filter, exclude, as_path, reverse):
+        self.filter = filter
+        self.reverse_filter = reverse_filter
+        self.exclude = exclude
+        self.reverse = reverse
+        self.number_type = 'float'
+        self.signed = True
+        self.exp = True
+        self.paths = as_path
+        self.locale = 0
+
+entries = ['tmp/a57/path2',
+           'tmp/a23/path1',
+           'tmp/a1/path1',
+           'tmp/a1 (1)/path1',
+           'tmp/a130/path1',
+           'tmp/a64/path1',
+           'tmp/a64/path2']
+
+mock_print = '__builtin__.print' if sys.version[0] == '2' else 'builtins.print'
+
+
+def test_sort_and_print_entries_uses_default_algorithm_with_all_options_false():
+    with patch(mock_print) as p:
+        # tmp/a1 (1)/path1
+        # tmp/a1/path1
+        # tmp/a23/path1
+        # tmp/a57/path2
+        # tmp/a64/path1
+        # tmp/a64/path2
+        # tmp/a130/path1
+        sort_and_print_entries(entries, Args(None, None, False, False, False))
+        e = [call(entries[i]) for i in [3, 2, 1, 0, 5, 6, 4]]
+        p.assert_has_calls(e)
+
+
+def test_sort_and_print_entries_uses_PATH_algorithm_with_path_option_true_to_properly_sort_OS_generated_path_names():
+    with patch(mock_print) as p:
+        # tmp/a1/path1
+        # tmp/a1 (1)/path1
+        # tmp/a23/path1
+        # tmp/a57/path2
+        # tmp/a64/path1
+        # tmp/a64/path2
+        # tmp/a130/path1
+        sort_and_print_entries(entries, Args(None, None, False, True, False))
+        e = [call(entries[i]) for i in [2, 3, 1, 0, 5, 6, 4]]
+        p.assert_has_calls(e)
+
+
+def test_sort_and_print_entries_keeps_only_paths_between_of_20_to_100_with_filter_option():
+    with patch(mock_print) as p:
+        # tmp/a23/path1
+        # tmp/a57/path2
+        # tmp/a64/path1
+        # tmp/a64/path2
+        sort_and_print_entries(entries, Args([(20, 100)], None, False, False, False))
+        e = [call(entries[i]) for i in [1, 0, 5, 6]]
+        p.assert_has_calls(e)
+
+
+def test_sort_and_print_entries_excludes_paths_between_of_20_to_100_with_reverse_filter_option():
+    with patch(mock_print) as p:
+        # tmp/a1/path1
+        # tmp/a1 (1)/path1
+        # tmp/a130/path1
+        sort_and_print_entries(entries, Args(None, [(20, 100)], False, True, False))
+        e = [call(entries[i]) for i in [2, 3, 4]]
+        p.assert_has_calls(e)
+
+
+def test_sort_and_print_entries_excludes_paths_23_or_130_with_exclude_option_list():
+    with patch(mock_print) as p:
+        # tmp/a1/path1
+        # tmp/a1 (1)/path1
+        # tmp/a57/path2
+        # tmp/a64/path1
+        # tmp/a64/path2
+        sort_and_print_entries(entries, Args(None, None, [23, 130], True, False))
+        e = [call(entries[i]) for i in [2, 3, 0, 5, 6]]
+        p.assert_has_calls(e)
+
+
+def test_sort_and_print_entries_reverses_order_with_reverse_option():
+    with patch(mock_print) as p:
+        # tmp/a130/path1
+        # tmp/a64/path2
+        # tmp/a64/path1
+        # tmp/a57/path2
+        # tmp/a23/path1
+        # tmp/a1 (1)/path1
+        # tmp/a1/path1
+        sort_and_print_entries(entries, Args(None, None, False, True, True))
+        e = [call(entries[i]) for i in reversed([2, 3, 1, 0, 5, 6, 4])]
+        p.assert_has_calls(e)
+
+
+# Each test has an "example" version for demonstrative purposes,
+# and a test that uses the hypothesis module.
+
+def test_range_check_returns_range_as_is_but_with_floats_if_first_is_less_than_second_example():
     assert range_check(10, 11) == (10.0, 11.0)
     assert range_check(6.4, 30) == (6.4, 30.0)
 
-    # Invalid ranges give a ValueErro
+
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(x=integers(), y=integers())
+def test_range_check_returns_range_as_is_but_with_floats_if_first_is_less_than_second(x, y):
+    assume(float(x) < float(y))
+    assert range_check(x, y) == (float(x), float(y))
+
+
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(x=floats(), y=floats())
+def test_range_check_returns_range_as_is_but_with_floats_if_first_is_less_than_second2(x, y):
+    assume(x < y)
+    assert range_check(x, y) == (x, y)
+
+
+def test_range_check_raises_ValueError_if_second_is_less_than_first_example():
     with raises(ValueError) as err:
         range_check(7, 2)
     assert str(err.value) == 'low >= high'
 
 
-def test_check_filter():
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(x=floats(), y=floats())
+def test_range_check_raises_ValueError_if_second_is_less_than_first(x, y):
+    assume(x >= y)
+    with raises(ValueError) as err:
+        range_check(x, x)
+    assert str(err.value) == 'low >= high'
 
-    # No filter gives 'None'
+
+def test_check_filter_returns_None_if_filter_evaluates_to_False():
     assert check_filter(()) is None
     assert check_filter(False) is None
     assert check_filter(None) is None
 
-    # The check filter always returns floats
+
+def test_check_filter_converts_filter_numbers_to_floats_if_filter_is_valid_example():
     assert check_filter([(6, 7)]) == [(6.0, 7.0)]
     assert check_filter([(6, 7), (2, 8)]) == [(6.0, 7.0), (2.0, 8.0)]
 
-    # Invalid ranges get a ValueError
+
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(x=tuples(integers(), integers(), floats(), floats()), y=tuples(integers(), floats(), floats(), integers()))
+def test_check_filter_converts_filter_numbers_to_floats_if_filter_is_valid(x, y):
+    assume(all(float(i) < float(j) for i, j in zip(x, y)))
+    assert check_filter(list(zip(x, y))) == [(float(i), float(j)) for i, j in zip(x, y)]
+
+
+def test_check_filter_raises_ValueError_if_filter_is_invalid_example():
     with raises(ValueError) as err:
         check_filter([(7, 2)])
     assert str(err.value) == 'Error in --filter: low >= high'
 
 
-def test_keep_entry_range():
-
-    regex = re.compile(r'\d+')
-    assert keep_entry_range('a56b23c89', [0], [100], int, regex)
-    assert keep_entry_range('a56b23c89', [1, 88], [20, 90], int, regex)
-    assert not keep_entry_range('a56b23c89', [1], [20], int, regex)
-
-
-def test_exclude_entry():
-
-    # Check if the exclude value is present in the input string
-    regex = re.compile(r'\d+')
-    assert exclude_entry('a56b23c89', [100, 45], int, regex)
-    assert not exclude_entry('a56b23c89', [23], int, regex)
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(x=tuples(integers(), integers(), floats(), floats()), y=tuples(integers(), floats(), floats(), integers()))
+def test_check_filter_raises_ValueError_if_filter_is_invalid(x, y):
+    assume(any(float(i) >= float(j) for i, j in zip(x, y)))
+    with raises(ValueError) as err:
+        check_filter(list(zip(x, y)))
+    assert str(err.value) == 'Error in --filter: low >= high'
 
 
-def test_sort_and_print_entries(capsys):
+def test_keep_entry_range_returns_True_if_any_portion_of_input_is_between_the_range_bounds_example():
+    assert keep_entry_range('a56b23c89', [0], [100], int, re.compile(r'\d+'))
 
-    class Args:
-        """A dummy class to simulate the argparse Namespace object"""
-        def __init__(self, filter, reverse_filter, exclude, as_path, reverse):
-            self.filter = filter
-            self.reverse_filter = reverse_filter
-            self.exclude = exclude
-            self.reverse = reverse
-            self.number_type = 'float'
-            self.signed = True
-            self.exp = True
-            self.paths = as_path
-            self.locale = 0
 
-    entries = ['tmp/a57/path2',
-               'tmp/a23/path1',
-               'tmp/a1/path1',
-               'tmp/a1 (1)/path1',
-               'tmp/a130/path1',
-               'tmp/a64/path1',
-               'tmp/a64/path2']
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(tuples(text(), integers(1, 99), text(), integers(1, 99), text()))
+def test_keep_entry_range_returns_True_if_any_portion_of_input_is_between_the_range_bounds(x):
+    s = ''.join(map(py23_str, x))
+    assume(any(0 < int(i) < 100 for i in re.findall(r'\d+', s) if re.match(r'\d+$', i)))
+    assert keep_entry_range(s, [0], [100], int, re.compile(r'\d+'))
 
-    # Just sort the paths
-    sort_and_print_entries(entries, Args(None, None, False, False, False))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a1 (1)/path1
-tmp/a1/path1
-tmp/a23/path1
-tmp/a57/path2
-tmp/a64/path1
-tmp/a64/path2
-tmp/a130/path1
-"""
 
-    # You would use --paths to make them sort
-    # as paths when the OS makes duplicates
-    sort_and_print_entries(entries, Args(None, None, False, True, False))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a1/path1
-tmp/a1 (1)/path1
-tmp/a23/path1
-tmp/a57/path2
-tmp/a64/path1
-tmp/a64/path2
-tmp/a130/path1
-"""
+def test_keep_entry_range_returns_True_if_any_portion_of_input_is_between_any_range_bounds_example():
+    assert keep_entry_range('a56b23c89', [1, 88], [20, 90], int, re.compile(r'\d+'))
 
-    # Sort the paths with numbers between 20-100
-    sort_and_print_entries(entries, Args([(20, 100)], None, False,
-                                         False, False))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a23/path1
-tmp/a57/path2
-tmp/a64/path1
-tmp/a64/path2
-"""
 
-    # Sort the paths without numbers between 20-100
-    sort_and_print_entries(entries, Args(None, [(20, 100)], False,
-                                         True, False))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a1/path1
-tmp/a1 (1)/path1
-tmp/a130/path1
-"""
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(tuples(text(), integers(2, 89), text(), integers(2, 89), text()))
+def test_keep_entry_range_returns_True_if_any_portion_of_input_is_between_any_range_bounds(x):
+    s = ''.join(map(py23_str, x))
+    assume(any((1 < int(i) < 20) or (88 < int(i) < 90) for i in re.findall(r'\d+', s) if re.match(r'\d+$', i)))
+    assert keep_entry_range(s, [1, 88], [20, 90], int, re.compile(r'\d+'))
 
-    # Sort the paths, excluding 23 and 130
-    sort_and_print_entries(entries, Args(None, None, [23, 130], True, False))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a1/path1
-tmp/a1 (1)/path1
-tmp/a57/path2
-tmp/a64/path1
-tmp/a64/path2
-"""
 
-    # Sort the paths, excluding 2
-    sort_and_print_entries(entries, Args(None, None, [2], False, False))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a1 (1)/path1
-tmp/a1/path1
-tmp/a23/path1
-tmp/a64/path1
-tmp/a130/path1
-"""
+def test_keep_entry_range_returns_False_if_no_portion_of_input_is_between_the_range_bounds_example():
+    assert not keep_entry_range('a56b23c89', [1], [20], int, re.compile(r'\d+'))
 
-    # Sort in reverse order
-    sort_and_print_entries(entries, Args(None, None, False, True, True))
-    out, __ = capsys.readouterr()
-    assert out == """\
-tmp/a130/path1
-tmp/a64/path2
-tmp/a64/path1
-tmp/a57/path2
-tmp/a23/path1
-tmp/a1 (1)/path1
-tmp/a1/path1
-"""
+
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(tuples(text(), integers(min_value=21), text(), integers(min_value=21), text()))
+def test_keep_entry_range_returns_False_if_no_portion_of_input_is_between_the_range_bounds(x):
+    s = ''.join(map(py23_str, x))
+    assume(all(not (1 <= int(i) <= 20) for i in re.findall(r'\d+', s) if re.match(r'\d+$', i)))
+    assert not keep_entry_range(s, [1], [20], int, re.compile(r'\d+'))
+
+
+def test_exclude_entry_returns_True_if_exlcude_parameters_are_not_in_input_example():
+    assert exclude_entry('a56b23c89', [100, 45], int, re.compile(r'\d+'))
+
+
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(tuples(text(), integers(min_value=0), text(), integers(min_value=0), text()))
+def test_exclude_entry_returns_True_if_exlcude_parameters_are_not_in_input(x):
+    s = ''.join(map(py23_str, x))
+    assume(not any(int(i) in (23, 45, 87) for i in re.findall(r'\d+', s) if re.match(r'\d+$', i)))
+    assert exclude_entry(s, [23, 45, 87], int, re.compile(r'\d+'))
+
+
+def test_exclude_entry_returns_False_if_exlcude_parameters_are_in_input_example():
+    assert not exclude_entry('a56b23c89', [23], int, re.compile(r'\d+'))
+
+
+@pytest.mark.skipif(not use_hypothesis, reason='requires python2.7 or greater')
+@given(tuples(text(), sampled_from([23, 45, 87]), text(), sampled_from([23, 45, 87]), text()))
+def test_exclude_entry_returns_False_if_exlcude_parameters_are_in_input(x):
+    s = ''.join(map(py23_str, x))
+    assume(any(int(i) in (23, 45, 87) for i in re.findall(r'\d+', s) if re.match(r'\d+$', i)))
+    assert not exclude_entry(s, [23, 45, 87], int, re.compile(r'\d+'))
