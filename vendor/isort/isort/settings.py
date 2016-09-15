@@ -24,11 +24,11 @@ OTHER DEALINGS IN THE SOFTWARE.
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import fnmatch
 import os
 from collections import namedtuple
 
-from pies.functools import lru_cache
-from pies.overrides import *
+from .pie_slice import *
 
 try:
     import configparser
@@ -36,14 +36,20 @@ except ImportError:
     import ConfigParser as configparser
 
 MAX_CONFIG_SEARCH_DEPTH = 25 # The number of parent directories isort will look for a config file within
+DEFAULT_SECTIONS = ("FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER")
 
-WrapModes = ('GRID', 'VERTICAL', 'HANGING_INDENT', 'VERTICAL_HANGING_INDENT', 'VERTICAL_GRID', 'VERTICAL_GRID_GROUPED')
+WrapModes = ('GRID', 'VERTICAL', 'HANGING_INDENT', 'VERTICAL_HANGING_INDENT', 'VERTICAL_GRID', 'VERTICAL_GRID_GROUPED', 'NOQA')
 WrapModes = namedtuple('WrapModes', WrapModes)(*range(len(WrapModes)))
 
 # Note that none of these lists must be complete as they are simply fallbacks for when included auto-detection fails.
 default = {'force_to_top': [],
            'skip': ['__init__.py', ],
+           'skip_glob': [],
            'line_length': 79,
+           'wrap_length': 0,
+           'sections': DEFAULT_SECTIONS,
+           'no_sections': False,
+           'known_future_library': ['__future__'],
            'known_standard_library': ["abc", "anydbm", "argparse", "array", "asynchat", "asyncore", "atexit", "base64",
                                       "BaseHTTPServer", "bisect", "bz2", "calendar", "cgitb", "cmd", "codecs",
                                       "collections", "commands", "compileall", "ConfigParser", "contextlib", "Cookie",
@@ -51,7 +57,7 @@ default = {'force_to_top': [],
                                       "decimal", "difflib", "dircache", "dis", "doctest", "dumbdbm", "EasyDialogs",
                                       "errno", "exceptions", "filecmp", "fileinput", "fnmatch", "fractions",
                                       "functools", "gc", "gdbm", "getopt", "getpass", "gettext", "glob", "grp", "gzip",
-                                      "hashlib", "heapq", "hmac", "imaplib", "imp", "inspect", "itertools", "json",
+                                      "hashlib", "heapq", "hmac", "imaplib", "imp", "inspect", "io", "itertools", "json",
                                       "linecache", "locale", "logging", "mailbox", "math", "mhlib", "mmap",
                                       "multiprocessing", "operator", "optparse", "os", "pdb", "pickle", "pipes",
                                       "pkgutil", "platform", "plistlib", "pprint", "profile", "pstats", "pwd", "pyclbr",
@@ -63,7 +69,7 @@ default = {'force_to_top': [],
                                       "timeit", "trace", "traceback", "unittest", "urllib", "urllib2", "urlparse",
                                       "usercustomize", "uuid", "warnings", "weakref", "webbrowser", "whichdb", "xml",
                                       "xmlrpclib", "zipfile", "zipimport", "zlib", 'builtins', '__builtin__', 'thread',
-                                      "binascii"],
+                                      "binascii", "statistics", "unicodedata", "fcntl", 'pathlib'],
            'known_third_party': ['google.appengine.api'],
            'known_first_party': [],
            'multi_line_output': WrapModes.GRID,
@@ -80,19 +86,31 @@ default = {'force_to_top': [],
            'import_heading_firstparty': '',
            'import_heading_localfolder': '',
            'balanced_wrapping': False,
-           'order_by_type': False,
+           'use_parentheses': False,
+           'order_by_type': True,
            'atomic': False,
            'lines_after_imports': -1,
+           'lines_between_sections': 1,
+           'lines_between_types': 0,
            'combine_as_imports': False,
            'combine_star': False,
-           'verbose': False}
+           'include_trailing_comma': False,
+           'from_first': False,
+           'verbose': False,
+           'quiet': False,
+           'force_adds': False,
+           'force_alphabetical_sort_within_sections': False,
+           'force_alphabetical_sort': False,
+           'force_grid_wrap': False,
+           'force_sort_within_sections': False,
+           'show_diff': False}
 
 
 @lru_cache()
 def from_path(path):
     computed_settings = default.copy()
     _update_settings_with_config(path, '.editorconfig', '~/.editorconfig', ('*', '*.py', '**.py'), computed_settings)
-    _update_settings_with_config(path, '.isort.cfg', '~/.isort.cfg', ('settings', ), computed_settings)
+    _update_settings_with_config(path, '.isort.cfg', '~/.isort.cfg', ('settings', 'isort'), computed_settings)
     _update_settings_with_config(path, 'setup.cfg', None, ('isort', ), computed_settings)
     return computed_settings
 
@@ -138,20 +156,30 @@ def _update_with_config_file(file_path, sections, computed_settings):
         access_key = key.replace('not_', '').lower()
         existing_value_type = type(default.get(access_key, ''))
         if existing_value_type in (list, tuple):
-            existing_data = set(computed_settings.get(access_key, default.get(access_key)))
-            if key.startswith('not_'):
-                computed_settings[access_key] = list(existing_data.difference(value.split(",")))
+            # sections has fixed order values; no adding or substraction from any set
+            if access_key == 'sections':
+                computed_settings[access_key] = tuple(_as_list(value))
             else:
-                computed_settings[access_key] = list(existing_data.union(value.split(",")))
+                existing_data = set(computed_settings.get(access_key, default.get(access_key)))
+                if key.startswith('not_'):
+                    computed_settings[access_key] = list(existing_data.difference(_as_list(value)))
+                else:
+                    computed_settings[access_key] = list(existing_data.union(_as_list(value)))
         elif existing_value_type == bool and value.lower().strip() == "false":
             computed_settings[access_key] = False
+        elif key.startswith('known_'):
+            computed_settings[access_key] = list(_as_list(value))
         else:
             computed_settings[access_key] = existing_value_type(value)
 
 
+def _as_list(value):
+    return filter(bool, [item.strip() for item in value.replace('\n', ',').split(",")])
+
+
 @lru_cache()
 def _get_config_data(file_path, sections):
-    with open(file_path) as config_file:
+    with open(file_path, 'rU') as config_file:
         if file_path.endswith(".editorconfig"):
             line = "\n"
             last_position = config_file.tell()
@@ -172,3 +200,22 @@ def _get_config_data(file_path, sections):
         return settings
 
     return {}
+
+
+def should_skip(filename, config, path='/'):
+    """Returns True if the file should be skipped based on the passed in settings."""
+    for skip_path in config['skip']:
+        if os.path.join(path, filename).endswith('/' + skip_path.lstrip('/')):
+            return True
+
+    position = os.path.split(filename)
+    while position[1]:
+        if position[1] in config['skip']:
+            return True
+        position = os.path.split(position[0])
+
+    for glob in config['skip_glob']:
+        if fnmatch.fnmatch(filename, glob):
+            return True
+
+    return False

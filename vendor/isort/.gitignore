@@ -6,6 +6,7 @@
 # Packages
 *.egg
 *.egg-info
+.eggs
 build
 eggs
 parts
@@ -16,6 +17,7 @@ develop-eggs
 lib
 lib64
 MANIFEST
+.eggs
 
 # Installer logs
 pip-log.txt
@@ -55,3 +57,10 @@ atlassian-ide-plugin.xml
 *.swp
 *.kate-swp
 .ropeproject/
+
+# pip
+pip-selfcheck.json
+
+# Python3 Venv Files
+venv/
+pyvenv.cfg

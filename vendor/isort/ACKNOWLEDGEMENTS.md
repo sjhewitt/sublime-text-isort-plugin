@@ -14,6 +14,7 @@ Notable Bug Reporters
 - Chris Adams (@acdha)
 - @OddBloke
 - Martin Geisler (@mgeisler)
+- Tim Heap (@timheap)
 
 Code Contributors
 ===================
@@ -33,6 +34,48 @@ Code Contributors
 - Chris Adams (@acdha)
 - GuoJing (@GuoJing)
 - George Hickman (@ghickman)
+- Dan Davison (@dandavison)
+- Maciej Wolff (@maciejwo)
+- Elliott Sales de Andrade (@qulogic)
+- Kasper Jacobsen (@dinoshauer)
+- Sebastian Pipping (@hartwork)
+- Helen Sherwood-Taylor (@helenst)
+- Mocker (@Zuckonit)
+- Tim Graham (@timgraham)
+- Adam (@NorthIsUp)
+- Norman Jäckel (@normanjaeckel)
+- Derrick Petzold (@dpetzold)
+- Michael van Tellingen (@mvantellingen)
+- Patrick Yevsukov (@patrickyevsukov)
+- Christer van der Meeren (@cmeeren)
+- Timon Wong/NHNCN (@timonwong)
+- Jeremy Dunck (@jdunck)
+- Benjamin ABEL (@benjaminabel)
+- Dan Baragan (@danbaragan)
+- Rob Cowie (@robcowie)
+- Amit Shah (@Amwam)
+- Patrick Gerken (@do3cc)
+- @dein0s
+- David Stensland (@terite)
+- Ankur Dedania (@AbsoluteMSTR)
+- Lee Packham (@leepa)
+- Jesse Mullan (@jmullan)
+- Kwok-kuen Cheung (@cheungpat)
+- Johan Bloemberg (@aequitas)
+- Dan Watson (@dcwatson)
+- Éric Araujo (@merwok)
+- Dan Palmer (@danpalmer)
+- Andy Boot (@bootandy)
+- @m7v8
+
+Documenters
+===================
+- Reinout van Rees (@reinout)
+- Helen Sherwood-Taylor (@helenst)
+- Elliott Sales de Andrade (@QuLogic)
+- Brian Peiris (@brianpeiris)
+- Tim Graham (@timgraham)
+- Josh Soref (@jsoref)
 
 --------------------------------------------
 
