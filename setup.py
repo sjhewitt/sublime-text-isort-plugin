@@ -35,29 +35,26 @@ except ImportError:
         def run(self):
             raise SystemExit(subprocess.call([sys.executable, 'runtests.py']))
 
-try:
-   import pypandoc
-   readme = pypandoc.convert('README.md', 'rst')
-except (IOError, ImportError, OSError, RuntimeError):
-   readme = ''
+with open('README.rst', 'r') as f:
+   readme = f.read()
 
 setup(name='isort',
-      version='3.9.0',
+      version='4.2.4',
       description='A Python utility / library to sort Python imports.',
       long_description=readme,
       author='Timothy Crosley',
       author_email='timothy.crosley@gmail.com',
       url='https://github.com/timothycrosley/isort',
-      download_url='https://github.com/timothycrosley/isort/archive/3.9.0.tar.gz',
+      download_url='https://github.com/timothycrosley/isort/archive/4.2.4.tar.gz',
       license="MIT",
       entry_points={
         'console_scripts': [
             'isort = isort.main:main',
-        ]
+        ],
+        'distutils.commands': ['isort = isort.main:ISortCommand'],
+        'pylama.linter': ['isort = isort.pylama_isort:Linter'],
       },
       packages=['isort'],
-      requires=['pies', 'natsort'],
-      install_requires=['pies>=2.6.0', 'natsort>=3.0.0'],
       cmdclass={'test': PyTest},
       keywords='Refactor, Python, Python2, Python3, Refactoring, Imports, Sort, Clean',
       classifiers=['Development Status :: 6 - Mature',
@@ -74,6 +71,8 @@ setup(name='isort',
                    'Programming Language :: Python :: 3.1',
                    'Programming Language :: Python :: 3.2',
                    'Programming Language :: Python :: 3.3',
+                   'Programming Language :: Python :: 3.4',
+                   'Programming Language :: Python :: 3.5',
                    'Topic :: Software Development :: Libraries',
                    'Topic :: Utilities'],
       **PyTest.extra_kwargs)
